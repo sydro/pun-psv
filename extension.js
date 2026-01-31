@@ -38,6 +38,8 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._psv = null
     this._punSeries = []
     this._psvSeries = []
+    this._punPrevMonth = null
+    this._psvPrevMonth = null
     this._lastUpdate = null
     this._timeoutId = 0
 
@@ -116,14 +118,18 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._punSeriesSection = new PopupMenu.PopupMenuSection()
     this._psvSeriesSection = new PopupMenu.PopupMenuSection()
 
-    this._punHeader = new PopupMenu.PopupMenuItem('Serie ultimi 60 giorni (PUN €/kWh)', { reactive: false })
-    this._psvHeader = new PopupMenu.PopupMenuItem('Serie ultimi 60 giorni (PSV €/Smc)', { reactive: false })
+    this._punHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PUN €/kWh)', { reactive: false })
+    this._psvHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PSV €/Smc)', { reactive: false })
+    this._punPrevItem = new PopupMenu.PopupMenuItem('Mese precedente: —', { reactive: false })
+    this._psvPrevItem = new PopupMenu.PopupMenuItem('Mese precedente: —', { reactive: false })
     this._seriesSeparator = new PopupMenu.PopupSeparatorMenuItem()
 
     this.menu.addMenuItem(this._punHeader)
+    this.menu.addMenuItem(this._punPrevItem)
     this.menu.addMenuItem(this._punSeriesSection)
     this.menu.addMenuItem(this._seriesSeparator)
     this.menu.addMenuItem(this._psvHeader)
+    this.menu.addMenuItem(this._psvPrevItem)
     this.menu.addMenuItem(this._psvSeriesSection)
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
 
@@ -192,6 +198,8 @@ class PunPsvIndicator extends PanelMenu.Button {
       this._psv = psvResult.latest
       this._punSeries = punResult.series
       this._psvSeries = psvResult.series
+      this._punPrevMonth = punResult.previousMonth ?? null
+      this._psvPrevMonth = psvResult.previousMonth ?? null
       this._lastUpdate = new Date()
 
       this._render()
@@ -218,6 +226,15 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     const t = this._lastUpdate ? this._lastUpdate.toLocaleString() : '—'
     this._timeItem.label.set_text(`Aggiornato: ${t}`)
+
+    const punPrev = this._punPrevMonth
+      ? `${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_DISPLAY_DECIMALS)} €/kWh`
+      : 'Mese precedente: —'
+    const psvPrev = this._psvPrevMonth
+      ? `${this._psvPrevMonth.label}: ${formatNumber(this._psvPrevMonth.value, PSV_DISPLAY_DECIMALS)} €/Smc`
+      : 'Mese precedente: —'
+    this._punPrevItem.label.set_text(punPrev)
+    this._psvPrevItem.label.set_text(psvPrev)
 
     this._renderSeries()
   }
@@ -275,8 +292,10 @@ class PunPsvIndicator extends PanelMenu.Button {
     const showPsv = mode === 'psv'
 
     this._punHeader.actor.visible = showPun
+    this._punPrevItem.actor.visible = showPun
     this._punSeriesSection.actor.visible = showPun
     this._psvHeader.actor.visible = showPsv
+    this._psvPrevItem.actor.visible = showPsv
     this._psvSeriesSection.actor.visible = showPsv
 
     for (const item of this._summaryItems) {

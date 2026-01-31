@@ -4,7 +4,22 @@ import Soup from 'gi://Soup?version=3.0'
 const PUN_URL = 'https://www.abbassalebollette.it/glossario/pun-prezzo-unico-nazionale/'
 const PSV_URL = 'https://www.abbassalebollette.it/glossario/psv/'
 
-const MAX_DAYS = 60
+const MAX_DAYS = 30
+
+const MONTHS_IT = [
+  'gennaio',
+  'febbraio',
+  'marzo',
+  'aprile',
+  'maggio',
+  'giugno',
+  'luglio',
+  'agosto',
+  'settembre',
+  'ottobre',
+  'novembre',
+  'dicembre',
+]
 
 function getCacheDir() {
   const base = GLib.get_user_cache_dir()
@@ -24,6 +39,14 @@ function readCache(path) {
       date: new Date(row.date),
       value: row.value,
     }))
+    if (data.previousMonth && typeof data.previousMonth.value === 'number') {
+      data.previousMonth = {
+        label: data.previousMonth.label ?? null,
+        value: data.previousMonth.value,
+      }
+    } else {
+      data.previousMonth = null
+    }
     return data
   } catch {
     return null
@@ -35,6 +58,7 @@ function writeCache(path, data) {
     const payload = {
       fetchedAt: data.fetchedAt,
       latest: data.latest,
+      previousMonth: data.previousMonth ?? null,
       series: data.series.map(row => ({
         date: row.date.toISOString().slice(0, 10),
         value: row.value,
@@ -72,6 +96,33 @@ function stripHtml(html) {
     .replace(/&nbsp;|&#160;/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function extractSection(text, startMarkers, endMarkers) {
+  const lower = text.toLowerCase()
+  let startIndex = -1
+  for (const marker of startMarkers) {
+    const idx = lower.indexOf(marker.toLowerCase())
+    if (idx !== -1 && (startIndex === -1 || idx < startIndex)) startIndex = idx
+  }
+  if (startIndex === -1) return text
+  let endIndex = -1
+  for (const marker of endMarkers) {
+    const idx = lower.indexOf(marker.toLowerCase(), startIndex + 1)
+    if (idx !== -1 && (endIndex === -1 || idx < endIndex)) endIndex = idx
+  }
+  if (endIndex === -1) return text.slice(startIndex)
+  return text.slice(startIndex, endIndex)
+}
+
+function getPreviousMonthInfo(date = new Date()) {
+  const year = date.getFullYear()
+  const month = date.getMonth()
+  const prev = new Date(year, month - 1, 1)
+  return {
+    monthName: MONTHS_IT[prev.getMonth()],
+    year: prev.getFullYear(),
+  }
 }
 
 function parseDateString(value) {
@@ -119,16 +170,99 @@ function filterLastDays(series, days) {
   return filtered.length ? filtered : series
 }
 
+function extractPreviousMonthValue(html, kind) {
+  const text = stripHtml(html)
+  const { monthName, year } = getPreviousMonthInfo()
+  const label = `${monthName.charAt(0).toUpperCase()}${monthName.slice(1)} ${year}`
+
+  if (kind === 'pun') {
+    const section = extractSection(
+      text,
+      ['i valori di pun monorario attuali'],
+      ['il pun spiegato', 'storico pun']
+    )
+    const regex = /PUN\s+([A-Za-zà]+)\s+(\d{4})(?:\s*\[[^\]]+\])?\s+([0-9.,]+)\s*€\/?kWh/gi
+    let match
+    while ((match = regex.exec(section)) !== null) {
+      const m = match[1].toLowerCase()
+      const y = Number(match[2])
+      if (m === monthName && y === year) {
+        const value = parseNumberString(match[3])
+        return value === null ? null : { label, value }
+      }
+    }
+    return null
+  }
+
+  const section = extractSection(
+    text,
+    ['valori indice psv per mese e anno', 'valori indice psv'],
+    ['indice psv', 'psv spiegato']
+  )
+  const regex = /PSV\s+([A-Za-zà]+)\s+(\d{4})(?:\s*\[[^\]]+\])?\s+([0-9.,]+)(?:\s*\[[^\]]+\])?\s+([0-9.,]+)/gi
+  let match
+  while ((match = regex.exec(section)) !== null) {
+    const m = match[1].toLowerCase()
+    const y = Number(match[2])
+    if (m === monthName && y === year) {
+      const value = parseNumberString(match[4])
+      return value === null ? null : { label, value }
+    }
+  }
+
+  // Fallback: usa la tabella HTML vera e propria (piu' affidabile)
+  const tableSection = extractSection(
+    html,
+    ['Valori Indice PSV per Mese e Anno'],
+    ['</table>']
+  )
+  const rowRegex = new RegExp(
+    '<tr[^>]*>\\s*<td[^>]*>\\s*<strong>\\s*PSV\\s+([A-Za-zà]+)\\s+(\\d{4})[^<]*<\\/strong>\\s*<\\/td>' +
+    '\\s*<td[^>]*>\\s*<strong>[^<]*<\\/strong>\\s*<\\/td>' +
+    '\\s*<td[^>]*>\\s*<strong>\\s*([0-9.,]+)[^<]*<\\/strong>',
+    'gi'
+  )
+  let row
+  while ((row = rowRegex.exec(tableSection)) !== null) {
+    const m = row[1].toLowerCase()
+    const y = Number(row[2])
+    if (m === monthName && y === year) {
+      const value = parseNumberString(row[3])
+      return value === null ? null : { label, value }
+    }
+  }
+
+  const rowRegexPlain = new RegExp(
+    '<tr[^>]*>\\s*<td[^>]*>\\s*PSV\\s+([A-Za-zà]+)\\s+(\\d{4})[^<]*<\\/td>' +
+    '\\s*<td[^>]*>\\s*[^<]*<\\/td>' +
+    '\\s*<td[^>]*>\\s*([0-9.,]+)\\s*<\\/td>',
+    'gi'
+  )
+  while ((row = rowRegexPlain.exec(tableSection)) !== null) {
+    const m = row[1].toLowerCase()
+    const y = Number(row[2])
+    if (m === monthName && y === year) {
+      const value = parseNumberString(row[3])
+      return value === null ? null : { label, value }
+    }
+  }
+
+  return null
+}
+
 async function getData({
   session,
   url,
   cachePath,
   refreshMinutes,
-  scale = 1,
+  scaleSeries = 1,
+  scalePrev = 1,
+  kind,
 }) {
   const ttlSeconds = Math.max(60, refreshMinutes * 60)
   const cached = readCache(cachePath)
-  if (isFresh(cached, ttlSeconds)) {
+  const needsPrev = cached && cached.previousMonth === null
+  if (isFresh(cached, ttlSeconds) && !needsPrev) {
     return { ...cached, stale: false }
   }
 
@@ -139,12 +273,17 @@ async function getData({
 
     const series = filterLastDays(raw, MAX_DAYS).map(row => ({
       date: row.date,
-      value: row.value * scale,
+      value: row.value * scaleSeries,
     }))
     const latest = series[series.length - 1].value
+    const previousMonth = kind ? extractPreviousMonthValue(html, kind) : null
+    const previousScaled = previousMonth
+      ? { label: previousMonth.label, value: previousMonth.value * scalePrev }
+      : null
     const payload = {
       fetchedAt: Math.floor(Date.now() / 1000),
       latest,
+      previousMonth: previousScaled,
       series,
     }
     writeCache(cachePath, payload)
@@ -163,7 +302,9 @@ export async function getPunData(session, refreshMinutes) {
     url: PUN_URL,
     cachePath,
     refreshMinutes,
-    scale: 1 / 1000,
+    scaleSeries: 1 / 1000,
+    scalePrev: 1,
+    kind: 'pun',
   })
 }
 
@@ -175,6 +316,8 @@ export async function getPsvData(session, refreshMinutes) {
     url: PSV_URL,
     cachePath,
     refreshMinutes,
-    scale: 1,
+    scaleSeries: 1,
+    scalePrev: 1,
+    kind: 'psv',
   })
 }
