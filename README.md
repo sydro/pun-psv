@@ -10,6 +10,7 @@ Estensione GNOME Shell che mostra **PUN** (luce) e **PSV** (gas) del mercato ita
 - **Mese precedente**: mostra il valore medio del mese precedente (in grassetto).
 - **Colori**: le celle dei valori sono verdi se **minori** del mese precedente, rosse se **maggiori**, con intensità proporzionale alla distanza.
 - **Refresh**: aggiornamento **una volta al giorno** con cache locale.
+- **Precisione**: la precisione dei valori è configurabile tramite costanti nel sorgente.
 
 ## Fonte dati
 
@@ -72,3 +73,10 @@ gnome-extensions uninstall pun-psv@sydro.github.com
 - `data.js`: fetch HTML, parsing, cache e normalizzazione.
 - `stylesheet.css`: stile top bar e popup.
 - `icons/`: icone SVG (lampadina e fiamma).
+
+## Personalizzazione precisione
+
+Nel file `extension.js` puoi modificare la precisione dei valori:
+
+- `PUN_DISPLAY_DECIMALS` e `PSV_DISPLAY_DECIMALS`: precisione **top bar**
+- `PUN_TABLE_DECIMALS` e `PSV_TABLE_DECIMALS`: precisione **tabelle**

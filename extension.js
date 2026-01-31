@@ -18,6 +18,8 @@ const DEFAULT_REFRESH_MINUTES = 1440
 
 const PUN_DISPLAY_DECIMALS = 2 // €/kWh
 const PSV_DISPLAY_DECIMALS = 2 // €/Smc
+const PUN_TABLE_DECIMALS = 3
+const PSV_TABLE_DECIMALS = 3
 
 function formatNumber(value, decimals = 3) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
@@ -228,10 +230,10 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._timeItem.label.set_text(`Aggiornato: ${t}`)
 
     const punPrev = this._punPrevMonth
-      ? `<b>${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_DISPLAY_DECIMALS)} €/kWh</b>`
+      ? `<b>${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_TABLE_DECIMALS)} €/kWh</b>`
       : 'Mese precedente: —'
     const psvPrev = this._psvPrevMonth
-      ? `<b>${this._psvPrevMonth.label}: ${formatNumber(this._psvPrevMonth.value, PSV_DISPLAY_DECIMALS)} €/Smc</b>`
+      ? `<b>${this._psvPrevMonth.label}: ${formatNumber(this._psvPrevMonth.value, PSV_TABLE_DECIMALS)} €/Smc</b>`
       : 'Mese precedente: —'
     this._punPrevItem.label.clutter_text.set_markup(punPrev)
     this._psvPrevItem.label.clutter_text.set_markup(psvPrev)
@@ -245,8 +247,8 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     const punPrevValue = this._punPrevMonth ? this._punPrevMonth.value : null
     const psvPrevValue = this._psvPrevMonth ? this._psvPrevMonth.value : null
-    this._punTableItem.add_child(this._buildSeriesTable(this._punSeries, PUN_DISPLAY_DECIMALS, punPrevValue))
-    this._psvTableItem.add_child(this._buildSeriesTable(this._psvSeries, PSV_DISPLAY_DECIMALS, psvPrevValue))
+    this._punTableItem.add_child(this._buildSeriesTable(this._punSeries, PUN_TABLE_DECIMALS, punPrevValue))
+    this._psvTableItem.add_child(this._buildSeriesTable(this._psvSeries, PSV_TABLE_DECIMALS, psvPrevValue))
   }
 
   _buildSeriesTable(series, decimals, prevValue) {
