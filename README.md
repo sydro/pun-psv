@@ -23,7 +23,7 @@ I dati vengono letti dalle pagine HTML pubbliche di:
 
 ## Screenshot
 
-_(Incolla qui lo screenshot)_
+![Popup](screenshots/popup.png)
 
 ## Installazione
 
