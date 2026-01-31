@@ -14,7 +14,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js'
 
 import { getPunData, getPsvData } from './data.js'
 
-const DEFAULT_REFRESH_MINUTES = 15
+const DEFAULT_REFRESH_MINUTES = 1440
 
 const PUN_DISPLAY_DECIMALS = 2 // €/kWh
 const PSV_DISPLAY_DECIMALS = 2 // €/Smc
@@ -115,8 +115,8 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
 
-    this._punSeriesSection = new PopupMenu.PopupMenuSection()
-    this._psvSeriesSection = new PopupMenu.PopupMenuSection()
+    this._punTableItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
+    this._psvTableItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
 
     this._punHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PUN €/kWh)', { reactive: false })
     this._psvHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PSV €/Smc)', { reactive: false })
@@ -126,11 +126,11 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     this.menu.addMenuItem(this._punHeader)
     this.menu.addMenuItem(this._punPrevItem)
-    this.menu.addMenuItem(this._punSeriesSection)
+    this.menu.addMenuItem(this._punTableItem)
     this.menu.addMenuItem(this._seriesSeparator)
     this.menu.addMenuItem(this._psvHeader)
     this.menu.addMenuItem(this._psvPrevItem)
-    this.menu.addMenuItem(this._psvSeriesSection)
+    this.menu.addMenuItem(this._psvTableItem)
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
 
     const refreshNow = new PopupMenu.PopupMenuItem('Aggiorna ora')
@@ -228,26 +228,28 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._timeItem.label.set_text(`Aggiornato: ${t}`)
 
     const punPrev = this._punPrevMonth
-      ? `${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_DISPLAY_DECIMALS)} €/kWh`
+      ? `<b>${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_DISPLAY_DECIMALS)} €/kWh</b>`
       : 'Mese precedente: —'
     const psvPrev = this._psvPrevMonth
-      ? `${this._psvPrevMonth.label}: ${formatNumber(this._psvPrevMonth.value, PSV_DISPLAY_DECIMALS)} €/Smc`
+      ? `<b>${this._psvPrevMonth.label}: ${formatNumber(this._psvPrevMonth.value, PSV_DISPLAY_DECIMALS)} €/Smc</b>`
       : 'Mese precedente: —'
-    this._punPrevItem.label.set_text(punPrev)
-    this._psvPrevItem.label.set_text(psvPrev)
+    this._punPrevItem.label.clutter_text.set_markup(punPrev)
+    this._psvPrevItem.label.clutter_text.set_markup(psvPrev)
 
     this._renderSeries()
   }
 
   _renderSeries() {
-    this._punSeriesSection.removeAll()
-    this._psvSeriesSection.removeAll()
+    this._punTableItem.remove_all_children()
+    this._psvTableItem.remove_all_children()
 
-    this._punSeriesSection.addMenuItem(this._buildSeriesTable(this._punSeries, PUN_DISPLAY_DECIMALS))
-    this._psvSeriesSection.addMenuItem(this._buildSeriesTable(this._psvSeries, PSV_DISPLAY_DECIMALS))
+    const punPrevValue = this._punPrevMonth ? this._punPrevMonth.value : null
+    const psvPrevValue = this._psvPrevMonth ? this._psvPrevMonth.value : null
+    this._punTableItem.add_child(this._buildSeriesTable(this._punSeries, PUN_DISPLAY_DECIMALS, punPrevValue))
+    this._psvTableItem.add_child(this._buildSeriesTable(this._psvSeries, PSV_DISPLAY_DECIMALS, psvPrevValue))
   }
 
-  _buildSeriesTable(series, decimals) {
+  _buildSeriesTable(series, decimals, prevValue) {
     const pairsPerRow = 3
     const container = new St.BoxLayout({
       vertical: true,
@@ -257,6 +259,14 @@ class PunPsvIndicator extends PanelMenu.Button {
     const rows = []
     for (let i = 0; i < series.length; i += pairsPerRow) {
       rows.push(series.slice(i, i + pairsPerRow))
+    }
+
+    let maxAbsDiff = 0
+    if (prevValue !== null && prevValue !== undefined) {
+      for (const item of series) {
+        const diff = Math.abs(item.value - prevValue)
+        if (diff > maxAbsDiff) maxAbsDiff = diff
+      }
     }
 
     for (let i = 0; i < rows.length; i += 1) {
@@ -276,15 +286,23 @@ class PunPsvIndicator extends PanelMenu.Button {
           text: formatNumber(cell.value, decimals),
           style_class: 'punpsv-cell punpsv-value',
         })
+        if (prevValue !== null && prevValue !== undefined && maxAbsDiff > 0) {
+          const diff = cell.value - prevValue
+          const intensity = Math.min(1, Math.abs(diff) / maxAbsDiff)
+          const alpha = 0.08 + 0.32 * intensity
+          if (diff < 0) {
+            valueLabel.set_style(`background-color: rgba(0, 140, 0, ${alpha.toFixed(2)}); color: #000000;`)
+          } else if (diff > 0) {
+            valueLabel.set_style(`background-color: rgba(180, 0, 0, ${alpha.toFixed(2)}); color: #000000;`)
+          }
+        }
         rowBox.add_child(dateLabel)
         rowBox.add_child(valueLabel)
       }
       container.add_child(rowBox)
     }
 
-    const item = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
-    item.add_child(container)
-    return item
+    return container
   }
 
   _setMenuMode(mode) {
@@ -293,10 +311,10 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     this._punHeader.actor.visible = showPun
     this._punPrevItem.actor.visible = showPun
-    this._punSeriesSection.actor.visible = showPun
+    this._punTableItem.actor.visible = showPun
     this._psvHeader.actor.visible = showPsv
     this._psvPrevItem.actor.visible = showPsv
-    this._psvSeriesSection.actor.visible = showPsv
+    this._psvTableItem.actor.visible = showPsv
 
     for (const item of this._summaryItems) {
       item.actor.visible = mode === 'full'
