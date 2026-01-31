@@ -1,0 +1,50 @@
+.punpsv-label {
+  padding-left: 6px;
+  padding-right: 6px;
+  font-weight: 600;
+}
+
+.punpsv-icon {
+  icon-size: 14px;
+  color: #ffffff;
+}
+
+.punpsv-sep {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.punpsv-click {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.punpsv-table {
+  padding: 6px 0;
+}
+
+.punpsv-row {
+  spacing: 8px;
+}
+
+.punpsv-cell {
+  min-width: 90px;
+  font-size: 10px;
+  padding: 3px 6px;
+  background-color: #f2f2f2;
+  border-radius: 2px;
+}
+
+.punpsv-row-even .punpsv-cell {
+  background-color: #e0e0e0;
+}
+
+.punpsv-date {
+  min-width: 52px;
+  text-align: center;
+}
+
+.punpsv-value {
+  min-width: 70px;
+  text-align: right;
+}
