@@ -3,5 +3,5 @@
   "name": "PUN/PSV Tracker",
   "description": "Mostra PUN (luce) e PSV (gas) nella top bar con aggiornamento automatico.",
   "shell-version": ["45", "46", "47"],
-  "version": 1
+  "version": 2
 }
