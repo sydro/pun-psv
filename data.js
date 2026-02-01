@@ -20,6 +20,7 @@ const MONTHS_IT = [
   'novembre',
   'dicembre',
 ]
+const MONTH_INDEX = Object.fromEntries(MONTHS_IT.map((m, i) => [m, i]))
 
 function getCacheDir() {
   const base = GLib.get_user_cache_dir()
@@ -39,6 +40,14 @@ function readCache(path) {
       date: new Date(row.date),
       value: row.value,
     }))
+    if (Array.isArray(data.monthlySeries) && data.monthlySeries.length > 0) {
+      data.monthlySeries = data.monthlySeries.map(row => ({
+        date: new Date(row.date),
+        value: row.value,
+      }))
+    } else {
+      data.monthlySeries = null
+    }
     if (data.previousMonth && typeof data.previousMonth.value === 'number') {
       data.previousMonth = {
         label: data.previousMonth.label ?? null,
@@ -59,6 +68,12 @@ function writeCache(path, data) {
       fetchedAt: data.fetchedAt,
       latest: data.latest,
       previousMonth: data.previousMonth ?? null,
+      monthlySeries: Array.isArray(data.monthlySeries)
+        ? data.monthlySeries.map(row => ({
+          date: row.date.toISOString().slice(0, 10),
+          value: row.value,
+        }))
+        : null,
       series: data.series.map(row => ({
         date: row.date.toISOString().slice(0, 10),
         value: row.value,
@@ -150,8 +165,9 @@ function parseNumberString(value) {
 
 function extractSeriesFromHtml(html) {
   const text = stripHtml(html)
-  const regex = /(\d{2}[\/-]\d{2}[\/-]\d{4})[^0-9]{0,20}([\d.,]+)/g
   const rows = []
+
+  const regex = /(\d{2}[\/-]\d{2}[\/-]\d{4})[^0-9]{0,50}([0-9]+(?:[.,][0-9]+)?)(?:\s*€\/?(?:kWh|MWh|Smc))?/gi
   let match
   while ((match = regex.exec(text)) !== null) {
     const date = parseDateString(match[1])
@@ -159,6 +175,23 @@ function extractSeriesFromHtml(html) {
     if (!date || value === null) continue
     rows.push({ date, value })
   }
+
+  if (!rows.length) {
+    const dateRegex = /(\d{2}[\/-]\d{2}[\/-]\d{4})/g
+    let dateMatch
+    while ((dateMatch = dateRegex.exec(text)) !== null) {
+      const date = parseDateString(dateMatch[1])
+      if (!date) continue
+      const start = dateMatch.index + dateMatch[0].length
+      const slice = text.slice(start, start + 120)
+      const valueMatch = slice.match(/([0-9]+(?:[.,][0-9]+)?)(?:\s*€\/?(?:kWh|MWh|Smc))?/i)
+      if (!valueMatch) continue
+      const value = parseNumberString(valueMatch[1])
+      if (value === null) continue
+      rows.push({ date, value })
+    }
+  }
+
   rows.sort((a, b) => a.date - b.date)
   return rows
 }
@@ -250,6 +283,67 @@ function extractPreviousMonthValue(html, kind) {
   return null
 }
 
+function extractMonthlySeries(html, kind) {
+  const text = stripHtml(html)
+  const rows = []
+
+  if (kind === 'pun') {
+    const section = extractSection(
+      text,
+      ['i valori di pun monorario attuali'],
+      ['il pun spiegato', 'storico pun']
+    )
+    const regex = /PUN\s+([A-Za-zà]+)\s+(\d{4})(?:\s*\[[^\]]+\])?\s+([0-9.,]+)\s*€\/?kWh/gi
+    let match
+    while ((match = regex.exec(section)) !== null) {
+      const monthName = match[1].toLowerCase()
+      const year = Number(match[2])
+      if (monthName === 'oggi' || !(monthName in MONTH_INDEX)) continue
+      const value = parseNumberString(match[3])
+      if (value === null) continue
+      rows.push({ date: new Date(year, MONTH_INDEX[monthName], 1), value })
+    }
+  } else {
+    const tableSection = extractSection(
+      html,
+      ['Valori Indice PSV per Mese e Anno'],
+      ['</table>']
+    )
+    const regexStrong = new RegExp(
+      '<tr[^>]*>\\s*<td[^>]*>\\s*<strong>\\s*PSV\\s+([A-Za-zà]+)\\s+(\\d{4})[^<]*<\\/strong>\\s*<\\/td>' +
+      '\\s*<td[^>]*>\\s*<strong>[^<]*<\\/strong>\\s*<\\/td>' +
+      '\\s*<td[^>]*>\\s*<strong>\\s*([0-9.,]+)[^<]*<\\/strong>',
+      'gi'
+    )
+    let match
+    while ((match = regexStrong.exec(tableSection)) !== null) {
+      const monthName = match[1].toLowerCase()
+      const year = Number(match[2])
+      if (!(monthName in MONTH_INDEX)) continue
+      const value = parseNumberString(match[3])
+      if (value === null) continue
+      rows.push({ date: new Date(year, MONTH_INDEX[monthName], 1), value })
+    }
+    const regexPlain = new RegExp(
+      '<tr[^>]*>\\s*<td[^>]*>\\s*PSV\\s+([A-Za-zà]+)\\s+(\\d{4})[^<]*<\\/td>' +
+      '\\s*<td[^>]*>\\s*[^<]*<\\/td>' +
+      '\\s*<td[^>]*>\\s*([0-9.,]+)\\s*<\\/td>',
+      'gi'
+    )
+    while ((match = regexPlain.exec(tableSection)) !== null) {
+      const monthName = match[1].toLowerCase()
+      const year = Number(match[2])
+      if (!(monthName in MONTH_INDEX)) continue
+      const value = parseNumberString(match[3])
+      if (value === null) continue
+      rows.push({ date: new Date(year, MONTH_INDEX[monthName], 1), value })
+    }
+  }
+
+  rows.sort((a, b) => a.date - b.date)
+  return rows
+}
+
 async function getData({
   session,
   url,
@@ -262,7 +356,8 @@ async function getData({
   const ttlSeconds = Math.max(60, refreshMinutes * 60)
   const cached = readCache(cachePath)
   const needsPrev = cached && cached.previousMonth === null
-  if (isFresh(cached, ttlSeconds) && !needsPrev) {
+  const needsMonthly = cached && (!cached.monthlySeries || cached.monthlySeries.length === 0)
+  if (isFresh(cached, ttlSeconds) && !needsPrev && !needsMonthly) {
     return { ...cached, stale: false }
   }
 
@@ -280,10 +375,15 @@ async function getData({
     const previousScaled = previousMonth
       ? { label: previousMonth.label, value: previousMonth.value * scalePrev }
       : null
+    const monthlyRaw = kind ? extractMonthlySeries(html, kind) : []
+    const monthlySeries = monthlyRaw
+      .slice(-12)
+      .map(row => ({ date: row.date, value: row.value * scalePrev }))
     const payload = {
       fetchedAt: Math.floor(Date.now() / 1000),
       latest,
       previousMonth: previousScaled,
+      monthlySeries,
       series,
     }
     writeCache(cachePath, payload)

@@ -20,6 +20,8 @@ const PUN_DISPLAY_DECIMALS = 2 // €/kWh
 const PSV_DISPLAY_DECIMALS = 2 // €/Smc
 const PUN_TABLE_DECIMALS = 3
 const PSV_TABLE_DECIMALS = 3
+const CHART_HEIGHT = 120
+const MONTHS_SHORT = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic']
 
 function formatNumber(value, decimals = 3) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
@@ -40,6 +42,8 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._psv = null
     this._punSeries = []
     this._psvSeries = []
+    this._punMonthlySeries = []
+    this._psvMonthlySeries = []
     this._punPrevMonth = null
     this._psvPrevMonth = null
     this._lastUpdate = null
@@ -119,6 +123,8 @@ class PunPsvIndicator extends PanelMenu.Button {
 
     this._punTableItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
     this._psvTableItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
+    this._punChartItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
+    this._psvChartItem = new PopupMenu.PopupBaseMenuItem({ reactive: false, can_focus: false })
 
     this._punHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PUN €/kWh)', { reactive: false })
     this._psvHeader = new PopupMenu.PopupMenuItem('Serie ultimi 30 giorni (PSV €/Smc)', { reactive: false })
@@ -129,10 +135,12 @@ class PunPsvIndicator extends PanelMenu.Button {
     this.menu.addMenuItem(this._punHeader)
     this.menu.addMenuItem(this._punPrevItem)
     this.menu.addMenuItem(this._punTableItem)
+    this.menu.addMenuItem(this._punChartItem)
     this.menu.addMenuItem(this._seriesSeparator)
     this.menu.addMenuItem(this._psvHeader)
     this.menu.addMenuItem(this._psvPrevItem)
     this.menu.addMenuItem(this._psvTableItem)
+    this.menu.addMenuItem(this._psvChartItem)
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
 
     const refreshNow = new PopupMenu.PopupMenuItem('Aggiorna ora')
@@ -191,20 +199,30 @@ class PunPsvIndicator extends PanelMenu.Button {
   async refresh() {
     try {
       const refreshMinutes = this._getRefreshMinutes()
-      const [punResult, psvResult] = await Promise.all([
+      const results = await Promise.allSettled([
         getPunData(this._session, refreshMinutes),
         getPsvData(this._session, refreshMinutes),
       ])
 
-      this._pun = punResult.latest
-      this._psv = psvResult.latest
-      this._punSeries = punResult.series
-      this._psvSeries = psvResult.series
-      this._punPrevMonth = punResult.previousMonth ?? null
-      this._psvPrevMonth = psvResult.previousMonth ?? null
+      const punRes = results[0].status === 'fulfilled' ? results[0].value : null
+      const psvRes = results[1].status === 'fulfilled' ? results[1].value : null
+
+      if (punRes) {
+        this._pun = punRes.latest
+        this._punSeries = punRes.series
+        this._punMonthlySeries = punRes.monthlySeries ?? []
+        this._punPrevMonth = punRes.previousMonth ?? null
+      }
+      if (psvRes) {
+        this._psv = psvRes.latest
+        this._psvSeries = psvRes.series
+        this._psvMonthlySeries = psvRes.monthlySeries ?? []
+        this._psvPrevMonth = psvRes.previousMonth ?? null
+      }
       this._lastUpdate = new Date()
 
-      this._render()
+      const isError = results.some(r => r.status === 'rejected')
+      this._render(isError)
       this._setMenuMode('full')
     } catch (e) {
       // Non blocchiamo l’estensione: mostriamo “—”
@@ -244,11 +262,20 @@ class PunPsvIndicator extends PanelMenu.Button {
   _renderSeries() {
     this._punTableItem.remove_all_children()
     this._psvTableItem.remove_all_children()
+    this._punChartItem.remove_all_children()
+    this._psvChartItem.remove_all_children()
 
     const punPrevValue = this._punPrevMonth ? this._punPrevMonth.value : null
     const psvPrevValue = this._psvPrevMonth ? this._psvPrevMonth.value : null
-    this._punTableItem.add_child(this._buildSeriesTable(this._punSeries, PUN_TABLE_DECIMALS, punPrevValue))
-    this._psvTableItem.add_child(this._buildSeriesTable(this._psvSeries, PSV_TABLE_DECIMALS, psvPrevValue))
+    const punSeries = this._ensureMinSeries(this._punSeries)
+    const psvSeries = this._ensureMinSeries(this._psvSeries)
+
+    this._punTableItem.add_child(this._buildSeriesTable(punSeries, PUN_TABLE_DECIMALS, punPrevValue))
+    this._psvTableItem.add_child(this._buildSeriesTable(psvSeries, PSV_TABLE_DECIMALS, psvPrevValue))
+    const punChartSeries = this._punMonthlySeries.length ? this._punMonthlySeries : this._punSeries
+    const psvChartSeries = this._psvMonthlySeries.length ? this._psvMonthlySeries : this._psvSeries
+    this._punChartItem.add_child(this._buildChart(punChartSeries, PUN_TABLE_DECIMALS, '€/kWh'))
+    this._psvChartItem.add_child(this._buildChart(psvChartSeries, PSV_TABLE_DECIMALS, '€/Smc'))
   }
 
   _buildSeriesTable(series, decimals, prevValue) {
@@ -277,18 +304,19 @@ class PunPsvIndicator extends PanelMenu.Button {
         style_class: i % 2 === 0 ? 'punpsv-row punpsv-row-even' : 'punpsv-row',
       })
       for (const cell of row) {
+        const isPlaceholder = cell.placeholder === true
         const d = cell.date
-        const day = String(d.getDate()).padStart(2, '0')
-        const month = String(d.getMonth() + 1).padStart(2, '0')
+        const day = isPlaceholder ? '—' : String(d.getDate()).padStart(2, '0')
+        const month = isPlaceholder ? '—' : String(d.getMonth() + 1).padStart(2, '0')
         const dateLabel = new St.Label({
           text: `${day}/${month}`,
           style_class: 'punpsv-cell punpsv-date',
         })
         const valueLabel = new St.Label({
-          text: formatNumber(cell.value, decimals),
+          text: isPlaceholder ? '—' : formatNumber(cell.value, decimals),
           style_class: 'punpsv-cell punpsv-value',
         })
-        if (prevValue !== null && prevValue !== undefined && maxAbsDiff > 0) {
+        if (!isPlaceholder && prevValue !== null && prevValue !== undefined && maxAbsDiff > 0) {
           const diff = cell.value - prevValue
           const intensity = Math.min(1, Math.abs(diff) / maxAbsDiff)
           const alpha = 0.08 + 0.32 * intensity
@@ -307,6 +335,137 @@ class PunPsvIndicator extends PanelMenu.Button {
     return container
   }
 
+  _buildPlaceholderSeries() {
+    const rows = 5
+    const pairsPerRow = 3
+    const total = rows * pairsPerRow
+    const placeholder = []
+    for (let i = 0; i < total; i += 1) {
+      placeholder.push({
+        date: new Date(1970, 0, 1),
+        value: null,
+        placeholder: true,
+      })
+    }
+    return placeholder
+  }
+
+  _ensureMinSeries(series) {
+    const minCells = 15
+    if (!series || series.length === 0) return this._buildPlaceholderSeries()
+    if (series.length >= minCells) return series
+    const padded = [...series]
+    const missing = minCells - series.length
+    for (let i = 0; i < missing; i += 1) {
+      padded.push({
+        date: new Date(1970, 0, 1),
+        value: null,
+        placeholder: true,
+      })
+    }
+    return padded
+  }
+
+  _buildChart(series, decimals, unitLabel) {
+    const box = new St.BoxLayout({ vertical: true, style_class: 'punpsv-chart-box', x_expand: true })
+    const label = new St.Label({ text: unitLabel, style_class: 'punpsv-chart-unit' })
+    const area = new St.DrawingArea({ style_class: 'punpsv-chart', x_expand: true })
+    area.set_size(1, CHART_HEIGHT)
+    area.set_x_expand(true)
+
+    area.connect('repaint', () => {
+      if (!series.length) return
+      const cr = area.get_context()
+
+      const width = area.get_width()
+      const height = area.get_height()
+      const padLeft = 18
+      const padRight = 10
+      const padTop = 8
+      const padBottom = 14
+      const plotW = Math.max(1, width - padLeft - padRight)
+      const plotH = Math.max(1, height - padTop - padBottom)
+
+      let min = series[0].value
+      let max = series[0].value
+      for (const p of series) {
+        if (p.value < min) min = p.value
+        if (p.value > max) max = p.value
+      }
+      const range = Math.max(0.00001, max - min)
+      const paddedMin = min - range * 0.05
+      const paddedMax = max + range * 0.05
+      const paddedRange = Math.max(0.00001, paddedMax - paddedMin)
+
+      // Grid
+      cr.setSourceRGBA(0, 0, 0, 0.08)
+      cr.setLineWidth(1)
+      for (let i = 0; i <= 3; i += 1) {
+        const y = padTop + (plotH * i) / 3
+        cr.moveTo(padLeft, y)
+        cr.lineTo(padLeft + plotW, y)
+      }
+      cr.stroke()
+
+      // Line
+      cr.setSourceRGBA(0.13, 0.65, 0.27, 1)
+      cr.setLineWidth(2.5)
+      series.forEach((p, idx) => {
+        const x = padLeft + (plotW * idx) / Math.max(1, series.length - 1)
+        const y = padTop + plotH * (1 - (p.value - paddedMin) / paddedRange)
+        if (idx === 0) cr.moveTo(x, y)
+        else cr.lineTo(x, y)
+      })
+      cr.stroke()
+
+      // Dots
+      cr.setSourceRGBA(0.08, 0.5, 0.2, 1)
+      for (let i = 0; i < series.length; i += 1) {
+        const p = series[i]
+        const x = padLeft + (plotW * i) / Math.max(1, series.length - 1)
+        const y = padTop + plotH * (1 - (p.value - paddedMin) / paddedRange)
+        cr.arc(x, y, 2.4, 0, Math.PI * 2)
+        cr.fill()
+      }
+
+      // Labels
+      cr.setSourceRGBA(0.05, 0.45, 0.18, 1)
+      cr.selectFontFace('Sans', 0, 0)
+      cr.setFontSize(9)
+      for (let i = 0; i < series.length; i += 1) {
+        const p = series[i]
+        const x = padLeft + (plotW * i) / Math.max(1, series.length - 1)
+        const y = padTop + plotH * (1 - (p.value - paddedMin) / paddedRange)
+        const text = formatNumber(p.value, decimals)
+        const ext = cr.textExtents(text)
+        const tx = Math.min(Math.max(padLeft, x - ext.width / 2), padLeft + plotW - ext.width)
+        const ty = Math.max(padTop + ext.height + 2, y - 6)
+        cr.moveTo(tx, ty)
+        cr.showText(text)
+      }
+
+      // X-axis month labels
+      cr.setSourceRGBA(0, 0, 0, 0.55)
+      cr.setFontSize(8)
+      const step = Math.max(1, Math.ceil(series.length / 12))
+      for (let i = 0; i < series.length; i += step) {
+        const p = series[i]
+        const month = MONTHS_SHORT[p.date.getMonth()] ?? ''
+        if (!month) continue
+        const x = padLeft + (plotW * i) / Math.max(1, series.length - 1)
+        const y = padTop + plotH + 11
+        const ext = cr.textExtents(month)
+        const tx = Math.min(Math.max(padLeft, x - ext.width / 2), padLeft + plotW - ext.width)
+        cr.moveTo(tx, y)
+        cr.showText(month)
+      }
+    })
+
+    box.add_child(label)
+    box.add_child(area)
+    return box
+  }
+
   _setMenuMode(mode) {
     const showPun = mode === 'pun'
     const showPsv = mode === 'psv'
@@ -314,9 +473,11 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._punHeader.actor.visible = showPun
     this._punPrevItem.actor.visible = showPun
     this._punTableItem.actor.visible = showPun
+    this._punChartItem.actor.visible = showPun
     this._psvHeader.actor.visible = showPsv
     this._psvPrevItem.actor.visible = showPsv
     this._psvTableItem.actor.visible = showPsv
+    this._psvChartItem.actor.visible = showPsv
 
     for (const item of this._summaryItems) {
       item.actor.visible = mode === 'full'

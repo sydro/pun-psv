@@ -48,3 +48,20 @@
   min-width: 70px;
   text-align: right;
 }
+
+.punpsv-chart-box {
+  padding: 6px 4px 2px 4px;
+}
+
+.punpsv-chart-unit {
+  font-size: 10px;
+  color: #2e7d32;
+  padding-bottom: 2px;
+}
+
+.punpsv-chart {
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 6px;
+  min-height: 120px;
+  min-width: 100%;
+}
