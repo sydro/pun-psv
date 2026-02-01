@@ -155,15 +155,38 @@ class PunPsvIndicator extends PanelMenu.Button {
       refreshNow,
     ]
 
-    this._punButton.connect('button-press-event', () => {
+    this._punButton.connect('button-press-event', (actor, event) => {
+      if (event.get_button() === 3) {
+        this._setMenuMode('full')
+        this.menu.open()
+        return Clutter.EVENT_STOP
+      }
       this._setMenuMode('pun')
       this.menu.open()
       return Clutter.EVENT_STOP
     })
-    this._psvButton.connect('button-press-event', () => {
+    this._psvButton.connect('button-press-event', (actor, event) => {
+      if (event.get_button() === 3) {
+        this._setMenuMode('full')
+        this.menu.open()
+        return Clutter.EVENT_STOP
+      }
       this._setMenuMode('psv')
       this.menu.open()
       return Clutter.EVENT_STOP
+    })
+
+    this.connect('button-press-event', (actor, event) => {
+      const button = event.get_button()
+      if (button === 3) {
+        this._setMenuMode('full')
+        this.menu.open()
+        return Clutter.EVENT_STOP
+      }
+      if (button === 1 && event.get_source() === this) {
+        return Clutter.EVENT_STOP
+      }
+      return Clutter.EVENT_PROPAGATE
     })
 
     this.menu.connect('open-state-changed', (menu, isOpen) => {
