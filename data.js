@@ -352,12 +352,13 @@ async function getData({
   scaleSeries = 1,
   scalePrev = 1,
   kind,
+  forceRefresh = false,
 }) {
   const ttlSeconds = Math.max(60, refreshMinutes * 60)
   const cached = readCache(cachePath)
   const needsPrev = cached && cached.previousMonth === null
   const needsMonthly = cached && (!cached.monthlySeries || cached.monthlySeries.length === 0)
-  if (isFresh(cached, ttlSeconds) && !needsPrev && !needsMonthly) {
+  if (!forceRefresh && isFresh(cached, ttlSeconds) && !needsPrev && !needsMonthly) {
     return { ...cached, stale: false }
   }
 
@@ -394,7 +395,7 @@ async function getData({
   }
 }
 
-export async function getPunData(session, refreshMinutes) {
+export async function getPunData(session, refreshMinutes, forceRefresh = false) {
   const cacheDir = getCacheDir()
   const cachePath = GLib.build_filenamev([cacheDir, 'pun.json'])
   return getData({
@@ -405,10 +406,11 @@ export async function getPunData(session, refreshMinutes) {
     scaleSeries: 1 / 1000,
     scalePrev: 1,
     kind: 'pun',
+    forceRefresh,
   })
 }
 
-export async function getPsvData(session, refreshMinutes) {
+export async function getPsvData(session, refreshMinutes, forceRefresh = false) {
   const cacheDir = getCacheDir()
   const cachePath = GLib.build_filenamev([cacheDir, 'psv.json'])
   return getData({
@@ -419,5 +421,6 @@ export async function getPsvData(session, refreshMinutes) {
     scaleSeries: 1,
     scalePrev: 1,
     kind: 'psv',
+    forceRefresh,
   })
 }

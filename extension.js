@@ -47,6 +47,7 @@ class PunPsvIndicator extends PanelMenu.Button {
     this._punPrevMonth = null
     this._psvPrevMonth = null
     this._lastUpdate = null
+    this._isRefreshing = false
     this._timeoutId = 0
 
     // Top bar box (icons + values)
@@ -143,16 +144,16 @@ class PunPsvIndicator extends PanelMenu.Button {
     this.menu.addMenuItem(this._psvChartItem)
     this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem())
 
-    const refreshNow = new PopupMenu.PopupMenuItem('Aggiorna ora')
-    refreshNow.connect('activate', () => this.refresh())
-    this.menu.addMenuItem(refreshNow)
+    this._refreshNowItem = new PopupMenu.PopupMenuItem('Aggiorna ora')
+    this._refreshNowItem.connect('activate', () => this.refresh(true))
+    this.menu.addMenuItem(this._refreshNowItem)
 
     this._summaryItems = [
       this._punItem,
       this._psvItem,
       this._timeItem,
       this._seriesSeparator,
-      refreshNow,
+      this._refreshNowItem,
     ]
 
     this._punButton.connect('button-press-event', (actor, event) => {
@@ -219,12 +220,15 @@ class PunPsvIndicator extends PanelMenu.Button {
     return DEFAULT_REFRESH_MINUTES
   }
 
-  async refresh() {
+  async refresh(forceRefresh = false) {
+    if (this._isRefreshing) return
+    this._isRefreshing = true
+    this._render()
     try {
       const refreshMinutes = this._getRefreshMinutes()
       const results = await Promise.allSettled([
-        getPunData(this._session, refreshMinutes),
-        getPsvData(this._session, refreshMinutes),
+        getPunData(this._session, refreshMinutes, forceRefresh),
+        getPsvData(this._session, refreshMinutes, forceRefresh),
       ])
 
       const punRes = results[0].status === 'fulfilled' ? results[0].value : null
@@ -245,12 +249,14 @@ class PunPsvIndicator extends PanelMenu.Button {
       this._lastUpdate = new Date()
 
       const isError = results.some(r => r.status === 'rejected')
+      this._isRefreshing = false
       this._render(isError)
       this._setMenuMode('full')
     } catch (e) {
       // Non blocchiamo l’estensione: mostriamo “—”
       log(`[PUN/PSV] refresh error: ${e}`)
       this._lastUpdate = new Date()
+      this._isRefreshing = false
       this._render(true)
     }
   }
@@ -260,15 +266,17 @@ class PunPsvIndicator extends PanelMenu.Button {
     const psvTxt = formatNumber(this._psv, PSV_DISPLAY_DECIMALS)
 
     // Top bar text (stile simile allo screenshot: testo compatto)
+    const refreshSuffix = this._isRefreshing ? ' ...' : ''
     this._punValue.set_text(`${punTxt} €/kWh`)
-    this._psvValue.set_text(`${psvTxt} €/Smc${isError ? ' !' : ''}`)
+    this._psvValue.set_text(`${psvTxt} €/Smc${isError ? ' !' : ''}${refreshSuffix}`)
 
     // Menu dettagli
     this._punItem.label.set_text(`PUN: ${punTxt} €/kWh`)
     this._psvItem.label.set_text(`PSV: ${psvTxt} €/Smc`)
 
     const t = this._lastUpdate ? this._lastUpdate.toLocaleString() : '—'
-    this._timeItem.label.set_text(`Aggiornato: ${t}`)
+    this._timeItem.label.set_text(this._isRefreshing ? 'Aggiornamento in corso...' : `Aggiornato: ${t}`)
+    this._refreshNowItem.setSensitive(!this._isRefreshing)
 
     const punPrev = this._punPrevMonth
       ? `<b>${this._punPrevMonth.label}: ${formatNumber(this._punPrevMonth.value, PUN_TABLE_DECIMALS)} €/kWh</b>`
